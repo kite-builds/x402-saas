@@ -37,10 +37,9 @@ from google import genai
 from google.genai import types
 
 
-GEMINI_API_KEY = os.environ.get(
-    "GEMINI_API_KEY",
-    "REDACTED-USE-ENV-VAR",
-)
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
+if not GEMINI_API_KEY:
+    sys.exit("error: set GEMINI_API_KEY in your environment")
 
 # Free-tier-friendly vision model
 DEFAULT_MODEL = "gemini-2.5-flash"

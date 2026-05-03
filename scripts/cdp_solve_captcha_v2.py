@@ -35,9 +35,9 @@ import websocket
 from google import genai
 from google.genai import types
 
-GEMINI_API_KEY = os.environ.get(
-    "GEMINI_API_KEY", "REDACTED-USE-ENV-VAR"
-)
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
+if not GEMINI_API_KEY:
+    sys.exit("error: set GEMINI_API_KEY in your environment")
 DEFAULT_MODEL = "gemini-3.1-pro-preview"
 CDP_HTTP = os.environ.get("CDP_HTTP", "http://127.0.0.1:18800")
 

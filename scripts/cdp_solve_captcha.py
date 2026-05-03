@@ -36,10 +36,9 @@ import websocket  # pip install websocket-client
 from google import genai
 from google.genai import types
 
-GEMINI_API_KEY = os.environ.get(
-    "GEMINI_API_KEY",
-    "REDACTED-USE-ENV-VAR",
-)
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
+if not GEMINI_API_KEY:
+    sys.exit("error: set GEMINI_API_KEY in your environment")
 DEFAULT_MODEL = "gemini-2.5-flash"
 CDP_HTTP = os.environ.get("CDP_HTTP", "http://127.0.0.1:18800")
 
@@ -185,9 +184,26 @@ def ask_gemini(client: genai.Client, model: str, image_bytes: bytes, note: str) 
     return parse_decision((resp.text or "").strip())
 
 
-def cdp_screenshot(cdp: CDPClient) -> bytes:
-    res = cdp.call("Page.captureScreenshot", {"format": "png", "captureBeyondViewport": False})
+def cdp_screenshot(cdp: CDPClient, clip: Optional[dict] = None) -> bytes:
+    """Full-viewport screenshot, or clipped to {x,y,width,height,scale} if given."""
+    params: dict = {"format": "png", "captureBeyondViewport": False}
+    if clip:
+        params["clip"] = {**clip, "scale": clip.get("scale", 1)}
+    res = cdp.call("Page.captureScreenshot", params)
     return base64.b64decode(res["data"])
+
+
+def cdp_find_recaptcha_frame(cdp: CDPClient) -> Optional[dict]:
+    """Returns {x,y,width,height} viewport rect of the visible reCAPTCHA challenge iframe."""
+    js = """(() => {
+      const ifs = [...document.querySelectorAll('iframe[src*=recaptcha]')];
+      const visible = ifs.filter(f => f.offsetWidth > 100 && f.offsetHeight > 100);
+      if (!visible.length) return null;
+      const r = visible[0].getBoundingClientRect();
+      return {x: r.left, y: r.top, width: r.width, height: r.height};
+    })()"""
+    res = cdp.call("Runtime.evaluate", {"expression": js, "returnByValue": True})
+    return res.get("result", {}).get("value")
 
 
 def cdp_viewport_size(cdp: CDPClient) -> Tuple[int, int]:
@@ -237,8 +253,25 @@ def main() -> int:
     history: List[str] = []
 
     for r in range(1, args.max_rounds + 1):
+        # Try to crop to the reCAPTCHA challenge iframe for higher precision.
+        crop_offset = (0, 0)
+        clip = None
         try:
-            png = cdp_screenshot(cdp)
+            frame = cdp_find_recaptcha_frame(cdp)
+            if frame and frame.get("width", 0) > 100:
+                # Capture at 2x scale to give Gemini bigger pixels per tile
+                clip = {
+                    "x": int(frame["x"]),
+                    "y": int(frame["y"]),
+                    "width": int(frame["width"]),
+                    "height": int(frame["height"]),
+                    "scale": 2,
+                }
+                crop_offset = (int(frame["x"]), int(frame["y"]))
+        except Exception:
+            pass
+        try:
+            png = cdp_screenshot(cdp, clip=clip)
         except Exception as e:
             print(f"[round {r}] screenshot error: {e}")
             time.sleep(2)
@@ -277,12 +310,18 @@ def main() -> int:
             x = int(decision.get("x", 0))
             y = int(decision.get("y", 0))
             label = decision.get("label", "")
-            print(f"[round {r}] click ({x},{y}) — {label}")
+            # Map back from cropped/2x screenshot to viewport coords.
+            if clip:
+                vp_x = crop_offset[0] + x // clip.get("scale", 1)
+                vp_y = crop_offset[1] + y // clip.get("scale", 1)
+            else:
+                vp_x, vp_y = x, y
+            print(f"[round {r}] click rel=({x},{y}) -> viewport=({vp_x},{vp_y}) — {label}")
             try:
-                cdp_click(cdp, x, y)
+                cdp_click(cdp, vp_x, vp_y)
             except Exception as e:
                 print(f"[round {r}] click error: {e}")
-            history.append(f"click ({x},{y}) [{label[:40]}]")
+            history.append(f"click ({vp_x},{vp_y}) [{label[:40]}]")
             time.sleep(1.5)  # let page settle
             continue
 
