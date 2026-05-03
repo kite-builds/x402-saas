@@ -1,0 +1,19 @@
+services:
+  - type: web
+    name: x402-saas
+    runtime: node
+    plan: free
+    region: oregon
+    buildCommand: npm install --include=dev && npm run build
+    startCommand: npm start
+    healthCheckPath: /__x402/health
+    autoDeploy: true
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: X402_SAAS_DOMAIN
+        value: x402-saas.onrender.com
+      - key: X402_SAAS_FACILITATOR_URL
+        value: https://facilitator.x402.rs
+      - key: X402_SAAS_FEE_WALLET
+        sync: false
