@@ -271,16 +271,16 @@
       The backend is up. Try it from any terminal:
     </p>
     <pre><code># Health probe — no payment required
-curl https://files-tip-wash-unsigned.trycloudflare.com/__x402/health
+curl https://x402-saas.onrender.com/__x402/health
 
 # SIWE challenge — returns a nonce-signed message you'd sign with your wallet
-curl -X POST https://files-tip-wash-unsigned.trycloudflare.com/api/v1/auth/challenge \
+curl -X POST https://x402-saas.onrender.com/api/v1/auth/challenge \
   -H "content-type: application/json" \
   -d '{"walletAddress":"0xC504Fd656330A823C3ffcBAB048c05cF45F60Bdf"}'</code></pre>
     <p style="color: var(--dim); font-size: 13px;">
-      Backend runs on a Cloudflare quick-tunnel during preview; durable hosting is the next step.
+      Backend runs on Render (durable host, free tier — first request after idle takes ~30s).
       Real <a href="https://facilitator.x402.rs" style="color: var(--accent);">x402.rs</a> facilitator
-      wired in — verify and settle live against Base. 35/35 tests passing on the codebase.
+      wired in — verify and settle live against Base. 38/38 tests passing on the codebase.
     </p>
   </section>
 

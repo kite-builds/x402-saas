@@ -8,7 +8,7 @@
 
 **Live URLs (for "Project URL" / "Demo link"):**
 - Landing: https://x402-saas.surge.sh
-- Backend (cloudflared quick-tunnel): https://files-tip-wash-unsigned.trycloudflare.com
+- Backend (Render): https://x402-saas.onrender.com
   - Probe: `/__x402/health` → 200 JSON
   - SIWE: `POST /api/v1/auth/challenge` → returns nonce-signed message
 - Local source: `kite-ops/x402-saas/` (git repo, 35/35 tests, MIT licensed)

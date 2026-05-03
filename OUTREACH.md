@@ -53,7 +53,7 @@ why we built this.
 
 Live demo:
 - Landing: https://x402-saas.surge.sh
-- Backend health: https://files-tip-wash-unsigned.trycloudflare.com/__x402/health
+- Backend health: https://x402-saas.onrender.com/__x402/health
 - SIWE challenge: POST /api/v1/auth/challenge
 
 Built on top of our open-source x402-kit. 35/35 tests passing. Multi-tenant
