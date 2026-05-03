@@ -1,5 +1,11 @@
 import express, { type Request, type Response, type NextFunction, type Router } from "express";
 import { SaasDb, type Tenant, type Route } from "./db.js";
+import {
+  STUB_FACILITATOR,
+  type FacilitatorClient,
+  type PaymentPayload,
+  type PaymentRequirements,
+} from "./facilitator.js";
 
 export interface DataPlaneOptions {
   db: SaasDb;
@@ -18,37 +24,11 @@ export interface DataPlaneOptions {
    */
   feeWallet: string;
   /**
-   * x402-kit-style facilitator. v0 stub: a no-op verifier that records all incoming
-   * X-PAYMENT requests as paid. The real wiring will swap this for the
-   * Coinbase facilitator client.
+   * Facilitator implementation. Defaults to STUB_FACILITATOR (accepts
+   * "stub:<addr>" headers). Inject HttpFacilitator in production.
    */
   facilitator?: FacilitatorClient;
 }
-
-export interface FacilitatorClient {
-  verify(args: {
-    paymentHeader: string;
-    payTo: string;
-    amountUsd: string;
-    network: string;
-  }): Promise<
-    | { ok: true; payer: string; txHash: string | null }
-    | { ok: false; reason: string }
-  >;
-}
-
-const STUB_FACILITATOR: FacilitatorClient = {
-  async verify({ paymentHeader }) {
-    if (!paymentHeader) {
-      return { ok: false, reason: "missing X-PAYMENT" };
-    }
-    if (paymentHeader.startsWith("stub:")) {
-      const payer = paymentHeader.slice("stub:".length) || "0xstubpayer";
-      return { ok: true, payer, txHash: null };
-    }
-    return { ok: false, reason: "unknown payment scheme (stub facilitator)" };
-  },
-};
 
 export function dataPlaneRouter(opts: DataPlaneOptions): Router {
   const router = express.Router();
@@ -216,7 +196,7 @@ async function handleProxiedRequest(args: ProxiedRequestArgs): Promise<void> {
       status: "error",
       amountUsd: route.priceUsd,
       txHash: verify.txHash,
-      facilitator: "stub",
+      facilitator: facilitatorName(facilitator),
       latencyMs: Date.now() - start,
       reason: msg,
     });
@@ -228,17 +208,45 @@ async function handleProxiedRequest(args: ProxiedRequestArgs): Promise<void> {
   const body = await upstream.arrayBuffer();
   res.send(Buffer.from(body));
 
+  // Async settle (don't block response). On real facilitators this is the
+  // on-chain settlement call; on the stub it's a no-op.
+  let txHash: string | null = verify.txHash;
+  let settleStatus: "paid" | "rejected" = "paid";
+  let settleReason: string | null = null;
+  if (facilitator.settle && verify.payload && verify.requirements) {
+    try {
+      const r = await facilitator.settle({
+        payload: verify.payload as PaymentPayload,
+        requirements: verify.requirements as PaymentRequirements,
+      });
+      if (r.success) {
+        txHash = r.transaction ?? txHash;
+      } else {
+        settleStatus = "rejected";
+        settleReason = r.errorReason ?? "settle failed";
+      }
+    } catch (err) {
+      settleStatus = "rejected";
+      settleReason = `settle threw: ${err instanceof Error ? err.message : String(err)}`;
+    }
+  }
+
   db.recordEvent({
     tenantId: tenant.id,
     routeId: route.id,
     payer: verify.payer,
-    status: "paid",
+    status: settleStatus,
     amountUsd: route.priceUsd,
-    txHash: verify.txHash,
-    facilitator: "stub",
+    txHash,
+    facilitator: facilitatorName(facilitator),
     latencyMs: Date.now() - start,
-    reason: null,
+    reason: settleReason,
   });
+}
+
+function facilitatorName(f: FacilitatorClient): string {
+  if (f === STUB_FACILITATOR) return "stub";
+  return "http";
 }
 
 function forwardableHeaders(req: Request): Record<string, string> {
