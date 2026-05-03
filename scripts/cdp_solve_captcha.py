@@ -125,13 +125,51 @@ def pick_target(target_id: Optional[str], auto_pick: bool) -> dict:
 
 
 def parse_decision(text: str) -> dict:
-    s = text.strip()
+    """Tolerant JSON extractor. Tries fenced, raw, and last-resort regex."""
+    s = (text or "").strip()
+    if not s:
+        return {"error": "empty Gemini response"}
+    # 1) strip markdown fences
     s = re.sub(r"^```(?:json)?\s*", "", s)
     s = re.sub(r"\s*```$", "", s)
-    m = re.search(r"\{.*\}", s, re.DOTALL)
+    # 2) try whole thing
+    try:
+        return json.loads(s)
+    except Exception:
+        pass
+    # 3) first {...} block
+    m = re.search(r"\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}", s, re.DOTALL)
     if m:
-        s = m.group(0)
-    return json.loads(s)
+        try:
+            return json.loads(m.group(0))
+        except Exception:
+            pass
+    # 4) regex out the fields we care about
+    out: dict = {}
+    if re.search(r'"done"\s*:\s*true', s):
+        out["done"] = True
+        out["reason"] = (re.search(r'"reason"\s*:\s*"([^"]*)"', s) or [None, ""])[1] if re.search(r'"reason"', s) else ""
+        return out
+    err_m = re.search(r'"error"\s*:\s*"([^"]*)"', s)
+    if err_m:
+        return {"error": err_m.group(1)}
+    act_m = re.search(r'"action"\s*:\s*"(click|wait)"', s)
+    if act_m:
+        out["action"] = act_m.group(1)
+        if out["action"] == "click":
+            xm = re.search(r'"x"\s*:\s*(\d+)', s)
+            ym = re.search(r'"y"\s*:\s*(\d+)', s)
+            lm = re.search(r'"label"\s*:\s*"([^"]*)"', s)
+            if xm and ym:
+                out["x"] = int(xm.group(1))
+                out["y"] = int(ym.group(1))
+                out["label"] = lm.group(1) if lm else ""
+                return out
+        elif out["action"] == "wait":
+            sm = re.search(r'"seconds"\s*:\s*([\d.]+)', s)
+            out["seconds"] = float(sm.group(1)) if sm else 1.5
+            return out
+    return {"error": f"unparseable: {s[:120]}"}
 
 
 def ask_gemini(client: genai.Client, model: str, image_bytes: bytes, note: str) -> dict:
