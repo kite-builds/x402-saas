@@ -33,6 +33,49 @@ JOB_NAME = "x402-outreach-watch"
 STATE_PATH = Path(__file__).resolve().parent.parent / ".outreach_state.json"
 US_LOGIN = "kite-builds-erik"
 
+# Direct Telegram delivery (used when run outside the OpenClaw agent loop, e.g.
+# from launchd / system crontab — bypasses Anthropic API entirely).
+OPENCLAW_CONFIG = Path("/Users/botbot/.openclaw/openclaw.json")
+TG_CHAT_ID_DEFAULT = "6648541632"  # SP's Telegram chat
+
+
+def _telegram_token() -> str | None:
+    tok = os.environ.get("TELEGRAM_BOT_TOKEN")
+    if tok:
+        return tok
+    if not OPENCLAW_CONFIG.exists():
+        return None
+    try:
+        cfg = json.loads(OPENCLAW_CONFIG.read_text(encoding="utf-8"))
+        return (cfg.get("channels", {})
+                   .get("telegram", {})
+                   .get("botToken"))
+    except Exception:
+        return None
+
+
+def _telegram_post(text: str) -> bool:
+    """POST directly to Telegram Bot API. Returns True on 200."""
+    token = _telegram_token()
+    chat_id = os.environ.get("TELEGRAM_CHAT_ID", TG_CHAT_ID_DEFAULT)
+    if not token or not chat_id:
+        return False
+    payload = parse.urlencode({
+        "chat_id": chat_id,
+        "text": text,
+        "disable_web_page_preview": "true",
+    }).encode("utf-8")
+    req = request.Request(
+        f"https://api.telegram.org/bot{token}/sendMessage",
+        data=payload,
+        method="POST",
+    )
+    try:
+        with request.urlopen(req, timeout=10) as resp:
+            return resp.status == 200
+    except Exception:
+        return False
+
 # (label, owner, repo, number, kind)
 # kind="ours" → we filed it; alert on any new comment + state change
 # kind="commented" → we commented; alert on replies from non-us authors
@@ -165,12 +208,15 @@ def main() -> int:
     body = "\n\n".join(all_lines)
     msg = f"{header}\n\n{body}"
 
-    if tg_send is not None:
-        ok = tg_send(msg, job=JOB_NAME)
-        if not ok:
-            # Dedup or fail — fall back to plain print so OpenClaw forwards anyway
-            print(msg)
-    else:
+    # Delivery order:
+    #   1) Direct Telegram POST when token is reachable (works for launchd /
+    #      system cron — no Anthropic credit needed).
+    #   2) tools.telegram_send wrapper (OpenClaw stdout convention).
+    #   3) Plain stdout fallback.
+    delivered = _telegram_post(msg)
+    if not delivered and tg_send is not None:
+        delivered = tg_send(msg, job=JOB_NAME)
+    if not delivered:
         print(msg)
     return 0
 
