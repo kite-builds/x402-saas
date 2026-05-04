@@ -166,3 +166,60 @@ test("recordEvent / recentEvents / tenantMetrics", () => {
     cleanup();
   }
 });
+
+test("platformMetrics aggregates across tenants and computes 1% fee", () => {
+  const { db, cleanup } = freshDb();
+  try {
+    const a = db.createTenant({
+      walletAddress: "0xaaaa000000000000000000000000000000000000",
+      slug: "alpha",
+      network: "base",
+    });
+    const b = db.createTenant({
+      walletAddress: "0xbbbb000000000000000000000000000000000000",
+      slug: "bravo",
+      network: "base",
+    });
+    const ra = db.addRoute({
+      tenantId: a.id, method: "GET", path: "/a", priceUsd: "0.10",
+      backendUrl: "https://up.a",
+    });
+    const rb = db.addRoute({
+      tenantId: b.id, method: "GET", path: "/b", priceUsd: "0.50",
+      backendUrl: "https://up.b",
+    });
+    // 2 paid on tenant a, 1 paid + 1 rejected on tenant b.
+    db.recordEvent({ tenantId: a.id, routeId: ra.id, payer: "0xp1", status: "paid",     amountUsd: "0.10", txHash: "0x1", facilitator: "stub", latencyMs: 1, reason: null });
+    db.recordEvent({ tenantId: a.id, routeId: ra.id, payer: "0xp2", status: "paid",     amountUsd: "0.10", txHash: "0x2", facilitator: "stub", latencyMs: 1, reason: null });
+    db.recordEvent({ tenantId: b.id, routeId: rb.id, payer: "0xp1", status: "paid",     amountUsd: "0.50", txHash: "0x3", facilitator: "stub", latencyMs: 1, reason: null });
+    db.recordEvent({ tenantId: b.id, routeId: rb.id, payer: null,   status: "rejected", amountUsd: null,   txHash: null,  facilitator: null,   latencyMs: 1, reason: "no_pay" });
+
+    const m = db.platformMetrics();
+    assert.equal(m.tenantsTotal, 2);
+    assert.equal(m.tenantsActive, 2);
+    assert.equal(m.routesTotal, 2);
+    assert.equal(m.eventsTotal, 4);
+    assert.equal(m.eventsPaid, 3);
+    assert.equal(m.eventsRejected, 1);
+    assert.equal(m.uniquePayers, 2); // 0xp1 paid on both tenants but counts once
+    assert.equal(m.routedUsd, "0.700000"); // 0.10 + 0.10 + 0.50
+    assert.equal(m.feeUsd,    "0.007000"); // 1% of 0.70
+    assert.ok(m.now >= m.since);
+  } finally {
+    cleanup();
+  }
+});
+
+test("platformMetrics on empty db returns zeros without crashing", () => {
+  const { db, cleanup } = freshDb();
+  try {
+    const m = db.platformMetrics();
+    assert.equal(m.tenantsTotal, 0);
+    assert.equal(m.eventsTotal, 0);
+    assert.equal(m.routedUsd, "0.000000");
+    assert.equal(m.feeUsd, "0.000000");
+    assert.equal(m.uniquePayers, 0);
+  } finally {
+    cleanup();
+  }
+});

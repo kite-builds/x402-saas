@@ -304,6 +304,87 @@ export class SaasDb {
     };
   }
 
+  platformMetrics(): {
+    tenantsTotal: number;
+    tenantsActive: number;
+    routesTotal: number;
+    eventsTotal: number;
+    eventsPaid: number;
+    eventsRejected: number;
+    routedUsd: string;
+    feeUsd: string;
+    uniquePayers: number;
+    since: number;
+    now: number;
+  } {
+    // One SQL round-trip per resource — small enough that a single transaction
+    // would be over-engineering, large enough that it's worth showing each
+    // count separately for grant-reviewer scrutability.
+    const tenants = this.db
+      .prepare(
+        `SELECT
+           COUNT(*) AS total,
+           COUNT(CASE WHEN status='active' THEN 1 END) AS active
+         FROM tenants`,
+      )
+      .get() as { total: number; active: number };
+
+    const routes = this.db
+      .prepare(`SELECT COUNT(*) AS total FROM routes`)
+      .get() as { total: number };
+
+    const events = this.db
+      .prepare(
+        `SELECT
+           COUNT(*) AS total,
+           COUNT(CASE WHEN status='paid' THEN 1 END) AS paid,
+           COUNT(CASE WHEN status='rejected' THEN 1 END) AS rejected,
+           COUNT(DISTINCT CASE WHEN status='paid' THEN payer END) AS unique_payers,
+           COALESCE(SUM(CASE WHEN status='paid' THEN amount_atomic END), 0) AS routed_atomic,
+           COUNT(CASE WHEN status='paid' AND amount_atomic IS NULL AND amount_usd IS NOT NULL THEN 1 END) AS legacy_count,
+           MIN(created_at) AS since
+         FROM events`,
+      )
+      .get() as {
+        total: number;
+        paid: number;
+        rejected: number;
+        unique_payers: number;
+        routed_atomic: number;
+        legacy_count: number;
+        since: number | null;
+      };
+
+    let routedAtomic = BigInt(events.routed_atomic);
+    if (events.legacy_count > 0) {
+      const legacy = this.db
+        .prepare(
+          `SELECT amount_usd FROM events
+           WHERE status='paid' AND amount_atomic IS NULL AND amount_usd IS NOT NULL`,
+        )
+        .all() as { amount_usd: string }[];
+      for (const r of legacy) {
+        routedAtomic += BigInt(usdToAtomic(r.amount_usd) ?? 0);
+      }
+    }
+    // 1% platform fee (1/100). Integer-safe via the atomic-units sum.
+    const feeAtomic = routedAtomic / 100n;
+
+    return {
+      tenantsTotal: tenants.total,
+      tenantsActive: tenants.active,
+      routesTotal: routes.total,
+      eventsTotal: events.total,
+      eventsPaid: events.paid,
+      eventsRejected: events.rejected,
+      routedUsd: atomicToUsdString(routedAtomic),
+      feeUsd: atomicToUsdString(feeAtomic),
+      uniquePayers: events.unique_payers,
+      since: events.since ?? Date.now(),
+      now: Date.now(),
+    };
+  }
+
   close(): void {
     this.db.close();
   }

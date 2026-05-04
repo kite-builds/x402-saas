@@ -48,6 +48,10 @@ export function dataPlaneRouter(opts: DataPlaneOptions): Router {
       if (req.path === "/__x402/health") {
         return res.json({ ok: true, ts: Date.now(), service: "x402-saas-data-plane" });
       }
+      if (req.path === "/__x402/platform-metrics") {
+        // Public, no auth — grant reviewers can verify impact-data themselves.
+        return res.json(opts.db.platformMetrics());
+      }
       return res.status(404).json({ error: "no_tenant_in_host" });
     }
 
