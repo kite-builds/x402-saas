@@ -95,83 +95,81 @@ def _format_item(item: dict) -> str:
     return f"{flag} {short}"
 
 
-def _ensure_outlook_tab():
-    """Return a CDP page for outlook.live.com/mail. If no tab matches, navigate
-    the first existing tab to outlook (cheaper than spawning a new tab over
-    HTTP). The browser keeps the session cookie regardless of which tab loads it."""
+FOLDERS = [
+    ("inbox", "https://outlook.live.com/mail/0/inbox"),
+    ("junkemail", "https://outlook.live.com/mail/0/junkemail"),
+]
+
+
+def _navigate_and_extract(folder_url: str) -> dict:
+    """Drive the browser to a folder URL and return {rowCount, items}.
+    Reuses the first available CDP page; OK to navigate it freely between
+    folders since outlook keeps the session cookie."""
     from _cdp_lib import list_pages
+    import time as _t
     pages = list_pages()
-    for p in pages:
-        if "outlook.live.com/mail" in p.get("url", ""):
-            return p, False  # already on outlook
     if not pages:
-        raise RuntimeError("no CDP pages available")
+        return {"error": "no CDP pages"}
     target = pages[0]
     cli = CDPClient(target["webSocketDebuggerUrl"])
-    cli.call("Page.navigate", {"url": "https://outlook.live.com/mail/0/inbox"})
-    # Poll for completion (max ~25s)
-    import time as _t
-    for _ in range(50):
-        _t.sleep(0.5)
-        try:
-            state = cli.evaluate("document.readyState")
-            title = cli.evaluate("document.title") or ""
-            if state == "complete" and "moment" not in title.lower():
+    try:
+        cli.call("Page.navigate", {"url": folder_url})
+        for _ in range(50):
+            _t.sleep(0.5)
+            try:
+                state = cli.evaluate("document.readyState")
+                title = cli.evaluate("document.title") or ""
+                if state == "complete" and "moment" not in title.lower():
+                    break
+            except Exception:
                 break
-        except Exception:
-            break
-    _t.sleep(2.0)
-    cli.close()
-    # Re-list to get the updated url for the page we just navigated
-    pages = list_pages()
-    for p in pages:
-        if "outlook.live.com" in p.get("url", ""):
-            return p, True  # we just navigated it
-    raise RuntimeError("outlook navigation did not stick")
+        _t.sleep(2.0)
+        raw = cli.evaluate(EXTRACT_JS)
+    finally:
+        cli.close()
+    try:
+        return json.loads(raw or "{}")
+    except Exception:
+        return {"error": "json parse"}
 
 
 def main() -> int:
     debug = "--debug" in sys.argv
 
-    try:
-        page, _ = _ensure_outlook_tab()
-    except Exception as exc:
-        print(f"NO_REPLY (outlook tab unreachable: {exc})")
-        return 0
-
-    try:
-        client = CDPClient(page["webSocketDebuggerUrl"])
-        raw = client.evaluate(EXTRACT_JS)
-        client.close()
-    except Exception as exc:
-        # Browser closed / WS rejected. Stay quiet so we don't pollute Telegram.
-        print(f"NO_REPLY (CDP error: {exc})")
-        return 0
-
-    try:
-        payload = json.loads(raw or "{}")
-    except Exception:
-        payload = {}
-
-    if debug:
-        DEBUG_DUMP.write_text(json.dumps(payload, indent=2, ensure_ascii=False))
-        print(f"debug dump: {DEBUG_DUMP}")
-
-    items = payload.get("items", [])
-    if not items:
-        print("NO_REPLY (no rows extracted)")
-        return 0
-
     state = _load_state()
     seen: set[str] = set(state.get("seen_ids", []))
     fresh: list[dict] = []
-    for it in items:
+    all_items: list[dict] = []
+
+    # Walk both Inbox and Junk — junk-folder catches new senders Outlook hasn't trusted yet
+    # (e.g., the lablab.ai approval landed in junk on 2026-05-05).
+    for folder_name, folder_url in FOLDERS:
+        try:
+            payload = _navigate_and_extract(folder_url)
+        except Exception as exc:
+            if debug:
+                print(f"folder {folder_name} skipped: {exc}")
+            continue
+        if not isinstance(payload, dict):
+            continue
+        for it in payload.get("items", []):
+            it["_folder"] = folder_name
+            all_items.append(it)
+
+    if debug:
+        DEBUG_DUMP.write_text(json.dumps(all_items, indent=2, ensure_ascii=False))
+        print(f"debug dump: {DEBUG_DUMP}")
+
+    if not all_items:
+        print("NO_REPLY (no rows extracted from any folder)")
+        return 0
+
+    for it in all_items:
         iid = it.get("id") or ""
         if iid and iid not in seen:
             fresh.append(it)
             seen.add(iid)
 
-    # Cap stored ids at 500 (most-recent wins)
     state["seen_ids"] = sorted(seen)[-500:]
     _save_state(state)
 
