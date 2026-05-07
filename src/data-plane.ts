@@ -100,6 +100,62 @@ export function dataPlaneRouter(opts: DataPlaneOptions): Router {
         res.setHeader("Access-Control-Allow-Headers", "content-type");
         return res.status(204).end();
       }
+      if (req.path === "/__x402/visit-ping" && req.method === "GET") {
+        // 1x1 transparent GIF tracking pixel for fake-door landing pages.
+        // Query: ?p=<page-id>&r=<referrer-or-blank>
+        try {
+          const url = new URL(req.url, "http://x");
+          const page = String(url.searchParams.get("p") ?? "unknown").slice(0, 80);
+          const ref = String(url.searchParams.get("r") ?? "").slice(0, 200);
+          const line = JSON.stringify({
+            ts: new Date().toISOString(),
+            page,
+            ref,
+            ua: String(req.headers["user-agent"] ?? "").slice(0, 200),
+            ip: String(req.headers["x-forwarded-for"] ?? "").split(",")[0] || null,
+          }) + "\n";
+          try { require("node:fs").appendFileSync("/tmp/visits.jsonl", line); } catch (_) {}
+        } catch (_) {}
+        // 1x1 transparent GIF
+        const gif = Buffer.from(
+          "R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7",
+          "base64",
+        );
+        res.setHeader("Content-Type", "image/gif");
+        res.setHeader("Cache-Control", "no-store, max-age=0");
+        res.setHeader("Access-Control-Allow-Origin", "*");
+        return res.status(200).end(gif);
+      }
+      if (req.path === "/__x402/visit-summary") {
+        try {
+          const fs = require("node:fs");
+          const txt = fs.existsSync("/tmp/visits.jsonl")
+            ? fs.readFileSync("/tmp/visits.jsonl", "utf-8")
+            : "";
+          const lines = txt.split("\n").filter((l: string) => l.trim());
+          const entries = lines
+            .map((l: string) => { try { return JSON.parse(l); } catch { return null; } })
+            .filter((e: any) => e);
+          const isBot = (ua: string) => /bot|crawler|spider|curl|wget|python|axios|fetch|render-watcher|UptimeRobot/i.test(ua);
+          const human = entries.filter((e: any) => !isBot(String(e.ua ?? "")));
+          const byPage: Record<string, number> = {};
+          for (const e of human) {
+            const p = String(e.page ?? "unknown");
+            byPage[p] = (byPage[p] ?? 0) + 1;
+          }
+          return res.json({
+            total: entries.length,
+            human: human.length,
+            bots: entries.length - human.length,
+            byPage,
+            recent: human.slice(-10).map((e: any) => ({
+              ts: e.ts, page: e.page, ref: e.ref, ua: String(e.ua ?? "").slice(0, 60),
+            })),
+          });
+        } catch (e) {
+          return res.json({ error: "summary_failed", detail: String(e) });
+        }
+      }
       if (req.path === "/__x402/waitlist-summary") {
         try {
           const fs = require("node:fs");
