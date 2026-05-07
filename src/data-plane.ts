@@ -100,6 +100,32 @@ export function dataPlaneRouter(opts: DataPlaneOptions): Router {
         res.setHeader("Access-Control-Allow-Headers", "content-type");
         return res.status(204).end();
       }
+      if (req.path === "/__x402/waitlist-summary") {
+        try {
+          const fs = require("node:fs");
+          const txt = fs.existsSync("/tmp/waitlist.jsonl")
+            ? fs.readFileSync("/tmp/waitlist.jsonl", "utf-8")
+            : "";
+          const lines = txt.split("\n").filter((l: string) => l.trim());
+          const entries = lines
+            .map((l: string) => { try { return JSON.parse(l); } catch { return null; } })
+            .filter((e: any) => e && e.email);
+          const real = entries.filter((e: any) =>
+            !/example\.com|test|smoke|warm@|audit-check@/i.test(e.email));
+          return res.json({
+            total: entries.length,
+            real: real.length,
+            test: entries.length - real.length,
+            recent: real.slice(-10).map((e: any) => ({
+              ts: e.ts,
+              source: e.source,
+              domain: String(e.email).split("@")[1] || null,
+            })),
+          });
+        } catch (e) {
+          return res.json({ error: "summary_failed", detail: String(e) });
+        }
+      }
       return res.status(404).json({ error: "no_tenant_in_host" });
     }
 
