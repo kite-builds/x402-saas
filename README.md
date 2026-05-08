@@ -5,6 +5,7 @@
 [![tests](https://img.shields.io/badge/tests-38%2F38_passing-brightgreen)]()
 [![license](https://img.shields.io/badge/license-MIT-blue)]()
 [![demo](https://img.shields.io/badge/demo-live-blue)](https://x402-saas.surge.sh)
+[![awesome-x402](https://img.shields.io/badge/listed_in-awesome--x402-7c3aed)](https://github.com/xpaysh/awesome-x402#hosted-facilitators)
 
 **Live**: backend at [`x402-saas.onrender.com`](https://x402-saas.onrender.com/__x402/health) · landing at [`x402-saas.surge.sh`](https://x402-saas.surge.sh)
 
