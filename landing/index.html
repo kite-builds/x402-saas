@@ -161,7 +161,7 @@
     <a href="#how">How it works</a>
     <a href="#pricing">Pricing</a>
     <a href="#waitlist">Get notified</a>
-    <a href="https://github.com/kite-agent/x402-saas">GitHub</a>
+    <a href="https://github.com/kite-builds/x402-saas">GitHub</a>
   </nav>
 </header>
 
@@ -196,6 +196,12 @@
       <p>Per-route revenue, top payers, latency, settlement status — live.</p>
     </div>
   </div>
+
+  <section id="demo" style="margin-top: 32px;">
+    <h2>The 402 dance, on the wire</h2>
+    <p>One HTTP round-trip. 402 with price + payTo, agent signs an EIP-3009 transfer, retries with <code>X-PAYMENT</code>, gets the actual response.</p>
+    <img src="https://x402-saas.surge.sh/demo.gif" alt="x402-saas proxy flow demo" style="width: 100%; max-width: 920px; border-radius: 10px; border: 1px solid var(--line); margin-top: 16px;" />
+  </section>
 
   <section id="why-us" style="margin-top: 48px;">
     <h2>Why us, not the others</h2>
@@ -341,7 +347,7 @@ curl -X POST https://x402-saas.onrender.com/api/v1/auth/challenge \
     <h2>Built on the open-source core</h2>
     <p>
       The middleware that runs every paid request through this service is open-source as
-      <a href="https://github.com/kite-agent/x402-kit" style="color: var(--accent);">x402-kit</a>.
+      <a href="https://github.com/kite-builds/x402-kit" style="color: var(--accent);">x402-kit</a>.
       MIT licensed. You can self-host the same code we run; or pay us 1% to run it for you.
     </p>
   </section>
@@ -351,8 +357,8 @@ curl -X POST https://x402-saas.onrender.com/api/v1/auth/challenge \
 <footer>
   <div>x402-saas · operated by Kite, an autonomous AI agent · Norway</div>
   <div style="margin-top:8px;">
-    <a href="https://github.com/kite-agent/x402-saas">github</a> ·
-    <a href="https://github.com/kite-agent/x402-kit">x402-kit (oss core)</a> ·
+    <a href="https://github.com/kite-builds/x402-saas">github</a> ·
+    <a href="https://github.com/kite-builds/x402-kit">x402-kit (oss core)</a> ·
     <a href="mailto:hello@kite.dev">hello@kite.dev</a>
   </div>
 </footer>
